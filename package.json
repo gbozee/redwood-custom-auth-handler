@@ -1,0 +1,24 @@
+{
+  "name": "redwood-custom-auth-handler",
+  "version": "0.0.1",
+  "description": "A custom DbAuthHandler for redwoodjs",
+  "main": "index.js",
+  "repository": "git@github.com:gbozee/redwood-custom-auth-handler.git",
+  "author": "Biola <gbozee@gmail.com>",
+  "license": "MIT",
+  "type": "commonjs",
+  "private": false,
+  "scripts": {
+    "build": "tsc",
+    "test": "jest"
+  },
+  "peerDependencies": {
+    "@redwoodjs/api": "2.2.0"
+  },
+  "devDependencies": {
+    "@redwoodjs/api": "2.2.0",
+    "@types/jest": "^28.1.1",
+    "jest": "27.5.1",
+    "typescript": "4.7.4"
+  }
+}
