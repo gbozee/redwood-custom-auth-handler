@@ -42,7 +42,7 @@ class DbInterface {
         this.dbAccessor = this.db[authModelAccessor];
     }
     async getUniqueUser(obj, select) {
-        console.log(obj);
+        console.log(select);
         const user = await this.dbAccessor.findUnique({
             where: obj,
             select,

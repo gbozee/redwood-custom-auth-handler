@@ -33,7 +33,7 @@ export class DbInterface implements IDbInterface {
     this.dbAccessor = this.db[authModelAccessor];
   }
   async getUniqueUser(obj: { [key: string]: string }, select?: any) {
-    console.log(obj);
+    console.log(select);
     const user = await this.dbAccessor.findUnique({
       where: obj,
       select,
@@ -362,7 +362,7 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
     // See packages/graphql-server/src/__tests__/mapRwCorsToYoga.test.ts
     if (options.cors) {
       this.corsContext = _cors.createCorsContext(options.cors);
-    }
+  }
 
     try {
       const [session, csrfToken] = _shared.decryptSession(
