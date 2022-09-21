@@ -22,7 +22,7 @@ type CsrfTokenHeader = { "csrf-token": string };
 export interface IDbInterface {
   getUniqueUser: (obj: any, select?: any) => Promise<any>;
   saveUserData: (userObj: any, data: any) => Promise<any>;
-  findUserByToken: (userObj: any) => Promise<any>;
+  findUserByToken: (userObj: any, kind?: "reset" | "email") => Promise<any>;
 }
 
 export class DbInterface implements IDbInterface {
@@ -33,7 +33,6 @@ export class DbInterface implements IDbInterface {
     this.dbAccessor = this.db[authModelAccessor];
   }
   async getUniqueUser(obj: { [key: string]: string }, select?: any) {
-    console.log(select);
     const user = await this.dbAccessor.findUnique({
       where: obj,
       select,
@@ -46,10 +45,14 @@ export class DbInterface implements IDbInterface {
       data,
     });
   }
-  async findUserByToken(userObj) {
-    return await this.dbAccessor.findFirst({
-      where: userObj,
-    });
+  async findUserByToken(userObj, kind = "reset") {
+    console.log(userObj);
+    return await this.dbAccessor.findFirst(
+      {
+        where: userObj,
+      },
+      kind
+    );
   }
 }
 
@@ -99,7 +102,17 @@ interface ForgotPasswordFlowOptions<TUser = Record<string | number, any>> {
   };
   expires: number;
 }
-
+interface SendEmailTokenOptions<TUser = Record<string | number, any>> {
+  handler: (user: TUser) => any;
+}
+interface VerifyEmailOptions<TUser = Record<string | number, any>> {
+  handler: (user: TUser) => any;
+  errors?: {
+    emailTokenExpired?: string;
+    emailTokenInvalid?: string;
+    emailTokenRequired?: string;
+  };
+}
 interface LoginFlowOptions<TUser = Record<string | number, any>> {
   /**
    * Allow users to login. Defaults to true.
@@ -171,7 +184,7 @@ export interface DbAuthHandlerOptions<TUser = Record<string | number, any>> {
    * The name of the property you'd call on `db` to access your user credentials table.
    * ie. if your Prisma model is named `UserCredential` this value would be `userCredential`, as in `db.userCredential`
    */
-//   credentialModelAccessor?: keyof PrismaClient;
+  //   credentialModelAccessor?: keyof PrismaClient;
   /**
    *  A map of what dbAuth calls a field to what your database calls it.
    * `id` is whatever column you use to uniquely identify a user (probably
@@ -183,8 +196,10 @@ export interface DbAuthHandlerOptions<TUser = Record<string | number, any>> {
     hashedPassword: string;
     salt: string;
     resetToken: string;
+    emailToken: string;
     resetTokenExpiresAt: string;
     challenge?: string;
+    emailTokenExpiresAt: string;
   };
   /**
    * Object containing cookie config options
@@ -212,6 +227,8 @@ export interface DbAuthHandlerOptions<TUser = Record<string | number, any>> {
    * Object containing login options
    */
   signup: SignupFlowOptions;
+  sendEmailToken: SendEmailTokenOptions<TUser>;
+  verifyEmail: VerifyEmailOptions<TUser>;
 
   /**
    * Object containing WebAuthn options
@@ -234,7 +251,9 @@ export type AuthMethodNames =
   | "webAuthnRegOptions"
   | "webAuthnRegister"
   | "webAuthnAuthOptions"
-  | "webAuthnAuthenticate";
+  | "webAuthnAuthenticate"
+  | "verifyEmail"
+  | "sendEmailToken";
 
 type Params = {
   username?: string;
@@ -275,6 +294,8 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
       "webAuthnRegister",
       "webAuthnAuthOptions",
       "webAuthnAuthenticate",
+      "verifyEmail",
+      "sendEmailToken",
     ];
   }
   // class constant: maps the auth functions to their required HTTP verb for access
@@ -291,6 +312,8 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
       webAuthnRegister: "POST",
       webAuthnAuthOptions: "GET",
       webAuthnAuthenticate: "POST",
+      verifyEmail: "POST",
+      sendEmailToken: "GET",
     };
   }
 
@@ -362,7 +385,7 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
     // See packages/graphql-server/src/__tests__/mapRwCorsToYoga.test.ts
     if (options.cors) {
       this.corsContext = _cors.createCorsContext(options.cors);
-  }
+    }
 
     try {
       const [session, csrfToken] = _shared.decryptSession(
@@ -536,6 +559,54 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
           error: e.message,
         });
       }
+    }
+  }
+  async sendEmailToken() {
+    try {
+      const user = await this._getCurrentUser(); // need to return *something* for our existing Authorization header stuff
+      // to work, so return the user's ID in case we can use it for something
+      // in the future
+      const handlerUser = await (
+        this.options.sendEmailToken as SendEmailTokenOptions
+      ).handler(user);
+      if (
+        handlerUser == null ||
+        handlerUser[this.options.authFields.id] == null
+      ) {
+        throw new DbAuthError.NoUserIdError();
+      }
+
+      return this._loginResponse(handlerUser);
+    } catch (e) {
+      if (e instanceof DbAuthError.NotLoggedInError) {
+        return this._logoutResponse();
+      } else {
+        return this._logoutResponse({
+          error: e.message,
+        });
+      }
+    }
+  }
+  async verifyEmail() {
+    const { emailToken } = this.params;
+    // is the resetToken present?
+    if (emailToken == null || String(emailToken).trim() === "") {
+      throw new DbAuthError.ResetTokenRequiredError(
+        (
+          this.options.verifyEmail as ResetPasswordFlowOptions
+        )?.errors?.resetTokenRequired
+      );
+    }
+    let user = await this._findUserByToken(emailToken as string, "email");
+    const response = await (
+      this.options.verifyEmail as VerifyEmailOptions
+    ).handler(this._sanitizeUser(user));
+
+    // returning the user from the handler means to log them in automatically
+    if (response) {
+      return this._loginResponse(user);
+    } else {
+      return this._logoutResponse({});
     }
   }
 
@@ -837,32 +908,42 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
     return true;
   }
 
-  async _findUserByToken(token: string) {
+  async _findUserByToken(token: string, kind: "reset" | "email" = "reset") {
     const tokenExpires = new Date();
     tokenExpires.setSeconds(
       tokenExpires.getSeconds() -
         (this.options.forgotPassword as ForgotPasswordFlowOptions).expires
     );
-    const user = await this.dbInterface.findUserByToken({
-      [this.options.authFields.resetToken]: token,
-    });
+    const searchKey = kind === "reset" ? "resetToken" : "emailToken";
+    const user = await this.dbInterface.findUserByToken(
+      {
+        [this.options.authFields[searchKey]]: token,
+      },
+      kind
+    );
 
     // user not found with the given token
     if (!user) {
       throw new DbAuthError.ResetTokenInvalidError(
-        (
-          this.options.resetPassword as ResetPasswordFlowOptions
-        )?.errors?.resetTokenInvalid
+        kind === "reset"
+          ? (this.options.resetPassword as ResetPasswordFlowOptions)?.errors
+              ?.resetTokenInvalid
+          : (this.options.verifyEmail as VerifyEmailOptions)?.errors
+              ?.emailTokenInvalid
       );
     }
 
     // token has expired
-    if (user[this.options.authFields.resetTokenExpiresAt] < tokenExpires) {
+    const key =
+      kind === "email" ? "emailTokenExpiresAt" : "resetTokenExpiresAt";
+    if (user[this.options.authFields[key]] < tokenExpires) {
       await this._clearResetToken(user);
       throw new DbAuthError.ResetTokenExpiredError(
-        (
-          this.options.resetPassword as ResetPasswordFlowOptions
-        )?.errors?.resetTokenExpired
+        kind === "reset"
+          ? (this.options.resetPassword as ResetPasswordFlowOptions)?.errors
+              ?.resetTokenExpired
+          : (this.options.verifyEmail as VerifyEmailOptions)?.errors
+              ?.emailTokenExpired
       );
     }
 
@@ -981,9 +1062,15 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
       this._validateField("username", username) &&
       this._validateField("password", password)
     ) {
-      const user = await this.dbInterface.getUniqueUser({
-        [this.options.authFields.username]: username,
-      });
+      let user;
+      try {
+        user = await this.dbInterface.getUniqueUser({
+          [this.options.authFields.username]: username,
+        });
+      } catch (error) {
+        //some endpoints might throw an error when record doesn't exist
+        user = null;
+      }
 
       if (user) {
         throw new DbAuthError.DuplicateUsernameError(

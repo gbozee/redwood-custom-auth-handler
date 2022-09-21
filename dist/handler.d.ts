@@ -9,7 +9,7 @@ declare type CsrfTokenHeader = {
 export interface IDbInterface {
     getUniqueUser: (obj: any, select?: any) => Promise<any>;
     saveUserData: (userObj: any, data: any) => Promise<any>;
-    findUserByToken: (userObj: any) => Promise<any>;
+    findUserByToken: (userObj: any, kind?: "reset" | "email") => Promise<any>;
 }
 export declare class DbInterface implements IDbInterface {
     dbAccessor: any;
@@ -19,7 +19,7 @@ export declare class DbInterface implements IDbInterface {
         [key: string]: string;
     }, select?: any): Promise<any>;
     saveUserData(userObj: any, data: any): Promise<any>;
-    findUserByToken(userObj: any): Promise<any>;
+    findUserByToken(userObj: any, kind?: string): Promise<any>;
 }
 interface SignupHandlerOptions {
     username: string;
@@ -64,6 +64,17 @@ interface ForgotPasswordFlowOptions<TUser = Record<string | number, any>> {
         flowNotEnabled?: string;
     };
     expires: number;
+}
+interface SendEmailTokenOptions<TUser = Record<string | number, any>> {
+    handler: (user: TUser) => any;
+}
+interface VerifyEmailOptions<TUser = Record<string | number, any>> {
+    handler: (user: TUser) => any;
+    errors?: {
+        emailTokenExpired?: string;
+        emailTokenInvalid?: string;
+        emailTokenRequired?: string;
+    };
 }
 interface LoginFlowOptions<TUser = Record<string | number, any>> {
     /**
@@ -146,8 +157,10 @@ export interface DbAuthHandlerOptions<TUser = Record<string | number, any>> {
         hashedPassword: string;
         salt: string;
         resetToken: string;
+        emailToken: string;
         resetTokenExpiresAt: string;
         challenge?: string;
+        emailTokenExpiresAt: string;
     };
     /**
      * Object containing cookie config options
@@ -175,6 +188,8 @@ export interface DbAuthHandlerOptions<TUser = Record<string | number, any>> {
      * Object containing login options
      */
     signup: SignupFlowOptions;
+    sendEmailToken: SendEmailTokenOptions<TUser>;
+    verifyEmail: VerifyEmailOptions<TUser>;
     /**
      * Object containing WebAuthn options
      */
@@ -186,7 +201,7 @@ export interface DbAuthHandlerOptions<TUser = Record<string | number, any>> {
      */
     cors?: CorsConfig;
 }
-export declare type AuthMethodNames = "forgotPassword" | "getToken" | "login" | "logout" | "resetPassword" | "signup" | "validateResetToken" | "webAuthnRegOptions" | "webAuthnRegister" | "webAuthnAuthOptions" | "webAuthnAuthenticate";
+export declare type AuthMethodNames = "forgotPassword" | "getToken" | "login" | "logout" | "resetPassword" | "signup" | "validateResetToken" | "webAuthnRegOptions" | "webAuthnRegister" | "webAuthnAuthOptions" | "webAuthnAuthenticate" | "verifyEmail" | "sendEmailToken";
 declare type Params = {
     username?: string;
     password?: string;
@@ -223,6 +238,8 @@ export declare class ExternalAuthHandler<TUser extends Record<string | number, a
         webAuthnRegister: string;
         webAuthnAuthOptions: string;
         webAuthnAuthenticate: string;
+        verifyEmail: string;
+        sendEmailToken: string;
     };
     static get PAST_EXPIRES_DATE(): string;
     static get CSRF_TOKEN(): any;
@@ -249,6 +266,16 @@ export declare class ExternalAuthHandler<TUser extends Record<string | number, a
         "set-cookie": string;
     })[]>;
     getToken(): Promise<any[]>;
+    sendEmailToken(): Promise<[string, SetCookieHeader] | [{
+        id: string;
+    }, SetCookieHeader & CsrfTokenHeader, {
+        statusCode: number;
+    }]>;
+    verifyEmail(): Promise<[string, SetCookieHeader] | [{
+        id: string;
+    }, SetCookieHeader & CsrfTokenHeader, {
+        statusCode: number;
+    }]>;
     login(): Promise<[{
         id: string;
     }, SetCookieHeader & CsrfTokenHeader, {
@@ -282,7 +309,7 @@ export declare class ExternalAuthHandler<TUser extends Record<string | number, a
     _encrypt(data: string): any;
     _createSessionHeader(data: DbAuthSession, csrfToken: string): SetCookieHeader;
     _validateCsrf(): boolean;
-    _findUserByToken(token: string): Promise<any>;
+    _findUserByToken(token: string, kind?: "reset" | "email"): Promise<any>;
     _clearResetToken(user: any): Promise<void>;
     _verifyUser(username: string | undefined, password: string | undefined): Promise<any>;
     _getCurrentUser(): Promise<any>;

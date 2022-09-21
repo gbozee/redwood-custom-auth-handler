@@ -42,7 +42,6 @@ class DbInterface {
         this.dbAccessor = this.db[authModelAccessor];
     }
     async getUniqueUser(obj, select) {
-        console.log(select);
         const user = await this.dbAccessor.findUnique({
             where: obj,
             select,
@@ -55,10 +54,11 @@ class DbInterface {
             data,
         });
     }
-    async findUserByToken(userObj) {
+    async findUserByToken(userObj, kind = "reset") {
+        console.log(userObj);
         return await this.dbAccessor.findFirst({
             where: userObj,
-        });
+        }, kind);
     }
 }
 exports.DbInterface = DbInterface;
@@ -91,6 +91,8 @@ class ExternalAuthHandler {
             "webAuthnRegister",
             "webAuthnAuthOptions",
             "webAuthnAuthenticate",
+            "verifyEmail",
+            "sendEmailToken",
         ];
     }
     // class constant: maps the auth functions to their required HTTP verb for access
@@ -107,6 +109,8 @@ class ExternalAuthHandler {
             webAuthnRegister: "POST",
             webAuthnAuthOptions: "GET",
             webAuthnAuthenticate: "POST",
+            verifyEmail: "POST",
+            sendEmailToken: "GET",
         };
     }
     static get PAST_EXPIRES_DATE() {
@@ -290,6 +294,45 @@ class ExternalAuthHandler {
                     error: e.message,
                 });
             }
+        }
+    }
+    async sendEmailToken() {
+        try {
+            const user = await this._getCurrentUser(); // need to return *something* for our existing Authorization header stuff
+            // to work, so return the user's ID in case we can use it for something
+            // in the future
+            const handlerUser = await this.options.sendEmailToken.handler(user);
+            if (handlerUser == null ||
+                handlerUser[this.options.authFields.id] == null) {
+                throw new DbAuthError.NoUserIdError();
+            }
+            return this._loginResponse(handlerUser);
+        }
+        catch (e) {
+            if (e instanceof DbAuthError.NotLoggedInError) {
+                return this._logoutResponse();
+            }
+            else {
+                return this._logoutResponse({
+                    error: e.message,
+                });
+            }
+        }
+    }
+    async verifyEmail() {
+        const { emailToken } = this.params;
+        // is the resetToken present?
+        if (emailToken == null || String(emailToken).trim() === "") {
+            throw new DbAuthError.ResetTokenRequiredError(this.options.verifyEmail?.errors?.resetTokenRequired);
+        }
+        let user = await this._findUserByToken(emailToken, "email");
+        const response = await this.options.verifyEmail.handler(this._sanitizeUser(user));
+        // returning the user from the handler means to log them in automatically
+        if (response) {
+            return this._loginResponse(user);
+        }
+        else {
+            return this._logoutResponse({});
         }
     }
     async login() {
@@ -511,21 +554,31 @@ class ExternalAuthHandler {
         }
         return true;
     }
-    async _findUserByToken(token) {
+    async _findUserByToken(token, kind = "reset") {
         const tokenExpires = new Date();
         tokenExpires.setSeconds(tokenExpires.getSeconds() -
             this.options.forgotPassword.expires);
+        const searchKey = kind === "reset" ? "resetToken" : "emailToken";
         const user = await this.dbInterface.findUserByToken({
-            [this.options.authFields.resetToken]: token,
-        });
+            [this.options.authFields[searchKey]]: token,
+        }, kind);
         // user not found with the given token
         if (!user) {
-            throw new DbAuthError.ResetTokenInvalidError(this.options.resetPassword?.errors?.resetTokenInvalid);
+            throw new DbAuthError.ResetTokenInvalidError(kind === "reset"
+                ? this.options.resetPassword?.errors
+                    ?.resetTokenInvalid
+                : this.options.verifyEmail?.errors
+                    ?.emailTokenInvalid);
         }
         // token has expired
-        if (user[this.options.authFields.resetTokenExpiresAt] < tokenExpires) {
+        const key = kind === "email" ? "emailTokenExpiresAt" : "resetTokenExpiresAt";
+        if (user[this.options.authFields[key]] < tokenExpires) {
             await this._clearResetToken(user);
-            throw new DbAuthError.ResetTokenExpiredError(this.options.resetPassword?.errors?.resetTokenExpired);
+            throw new DbAuthError.ResetTokenExpiredError(kind === "reset"
+                ? this.options.resetPassword?.errors
+                    ?.resetTokenExpired
+                : this.options.verifyEmail?.errors
+                    ?.emailTokenExpired);
         }
         return user;
     }
@@ -605,9 +658,16 @@ class ExternalAuthHandler {
         const { username, password, ...userAttributes } = this.params;
         if (this._validateField("username", username) &&
             this._validateField("password", password)) {
-            const user = await this.dbInterface.getUniqueUser({
-                [this.options.authFields.username]: username,
-            });
+            let user;
+            try {
+                user = await this.dbInterface.getUniqueUser({
+                    [this.options.authFields.username]: username,
+                });
+            }
+            catch (error) {
+                //some endpoints might throw an error when record doesn't exist
+                user = null;
+            }
             if (user) {
                 throw new DbAuthError.DuplicateUsernameError(username, this.options.signup?.errors?.usernameTaken);
             } // if we get here everything is good, call the app's signup handler and let

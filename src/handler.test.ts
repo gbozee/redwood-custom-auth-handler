@@ -52,7 +52,7 @@ const TableMock = class {
     return JSON.parse(JSON.stringify(newRecord));
   }
 
-  findFirst({ where }) {
+  findFirst({ where }, kind) {
     const keys = Object.keys(where);
     let matchingRecords = this.records;
     keys.forEach((key) => {
@@ -146,6 +146,8 @@ describe("dbAuth", () => {
         resetToken: "resetToken",
         resetTokenExpiresAt: "resetTokenExpiresAt",
         challenge: "webAuthnChallenge",
+        emailToken: "emailToken",
+        emailTokenExpiresAt: "emailTokenExpiresAt",
       },
       dbInterface,
       excludeUserFields: [],
@@ -181,6 +183,12 @@ describe("dbAuth", () => {
           fieldMissing: "${field} is required",
           usernameTaken: "Username `${username}` already in use",
         },
+      },
+      verifyEmail: {
+        handler: (user) => user,
+      },
+      sendEmailToken: {
+        handler: (user) => user,
       },
       webAuthn: {
         enabled: true,
@@ -1771,6 +1779,109 @@ describe("dbAuth", () => {
       const user = await dbAuth._getCurrentUser();
 
       expect(user.id).toEqual(dbUser.id);
+    });
+  });
+  describe("sendEmailToken()", () => {
+    it("returns the logged in user", async () => {
+      const user = await createDbUser();
+      event = {
+        headers: {
+          cookie: encryptToCookie(
+            JSON.stringify({ id: user.id }) + ";" + "token"
+          ),
+        },
+      };
+      const dbAuth = new DbAuthHandler(event, context, options);
+      const response = await dbAuth.sendEmailToken();
+
+      expect(response[0].id).toEqual(user.id);
+    });
+    it("returns any other error", async () => {
+      event = {
+        headers: {
+          cookie: encryptToCookie(
+            JSON.stringify({ id: 9999999999 }) + ";" + "token"
+          ),
+        },
+      };
+      const dbAuth = new DbAuthHandler(event, context, options);
+      const response = await dbAuth.sendEmailToken();
+
+      expect(response[0]).toEqual('{"error":"User not found"}');
+    });
+  });
+  describe("verifyEmailToken", () => {
+    it("throws an error if emailToken is blank", async () => {
+      // missing completely
+      event.body = JSON.stringify({});
+      let dbAuth = new DbAuthHandler(event, context, options);
+
+      try {
+        await dbAuth.resetPassword();
+      } catch (e) {
+        expect(e).toBeInstanceOf(dbAuthError.ResetTokenRequiredError);
+      }
+
+      // empty string
+      event.body = JSON.stringify({ resetToken: " " });
+      dbAuth = new DbAuthHandler(event, context, options);
+
+      try {
+        await dbAuth.resetPassword();
+      } catch (e) {
+        expect(e).toBeInstanceOf(dbAuthError.ResetTokenRequiredError);
+      }
+
+      expect.assertions(2);
+    });
+    it("throws an error if no user found with emailToken", async () => {
+      event.body = JSON.stringify({ emailToken: "1234" });
+      const dbAuth = new DbAuthHandler(event, context, options);
+
+      try {
+        await dbAuth.verifyEmail();
+      } catch (e) {
+        expect(e).toBeInstanceOf(dbAuthError.ResetTokenInvalidError);
+      }
+      expect.assertions(1);
+    });
+    it("throws an error if emailToken is expired", async () => {
+      const tokenExpires = new Date();
+      tokenExpires.setSeconds(
+        tokenExpires.getSeconds() - options.forgotPassword.expires - 1
+      );
+      await createDbUser({
+        emailToken: "1234",
+        emailTokenExpiresAt: tokenExpires,
+      });
+
+      event.body = JSON.stringify({
+        emailToken: "1234",
+      });
+      const dbAuth = new DbAuthHandler(event, context, options);
+
+      try {
+        await dbAuth.verifyEmail();
+      } catch (e) {
+        expect(e).toBeInstanceOf(dbAuthError.ResetTokenExpiredError);
+      }
+      expect.assertions(1);
+    });
+    it("does not throw error", async () => {
+      const tokenExpires = new Date();
+      tokenExpires.setSeconds(
+        tokenExpires.getSeconds() - options.forgotPassword.expires + 1
+      );
+      const user = await createDbUser({
+        emailToken: "1234",
+        emailTokenExpiresAt: tokenExpires,
+      });
+      event.body = JSON.stringify({
+        emailToken: "1234",
+      });
+      const dbAuth = new DbAuthHandler(event, context, options);
+
+      await expect(dbAuth.verifyEmail()).resolves.not.toThrow();
     });
   });
 

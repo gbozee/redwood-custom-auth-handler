@@ -1,18 +1,14 @@
 {
-    "compilerOptions": {
-        "module": "CommonJS",
-        "target": "ESNext",
-        "moduleResolution": "node",
-        "resolveJsonModule": true,
-        "esModuleInterop": true,
-        "strict": false,
-        "declaration": true,
-        "outDir": "./dist"
-    },
-    "include": [
-        "src/**/*.ts"
-    ],
-    "exclude": [
-        "node_modules"
-    ]
+  "compilerOptions": {
+    "module": "CommonJS",
+    "target": "ESNext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "strict": false,
+    "declaration": true,
+    "outDir": "./dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "src/handler.test.ts"]
 }
