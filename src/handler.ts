@@ -105,6 +105,9 @@ interface ForgotPasswordFlowOptions<TUser = Record<string | number, any>> {
 interface SendEmailTokenOptions<TUser = Record<string | number, any>> {
   handler: (user: TUser) => any;
 }
+interface ChangeEmailOptions<TUser = Record<string | number, any>> {
+  handler: (user: TUser) => any;
+}
 interface VerifyEmailOptions<TUser = Record<string | number, any>> {
   handler: (user: TUser) => any;
   errors?: {
@@ -229,6 +232,7 @@ export interface DbAuthHandlerOptions<TUser = Record<string | number, any>> {
   signup: SignupFlowOptions;
   sendEmailToken: SendEmailTokenOptions<TUser>;
   verifyEmail: VerifyEmailOptions<TUser>;
+  changeEmail: ChangeEmailOptions<TUser>;
 
   /**
    * Object containing WebAuthn options
@@ -253,7 +257,8 @@ export type AuthMethodNames =
   | "webAuthnAuthOptions"
   | "webAuthnAuthenticate"
   | "verifyEmail"
-  | "sendEmailToken";
+  | "sendEmailToken"
+  | "changeEmail";
 
 type Params = {
   username?: string;
@@ -296,6 +301,7 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
       "webAuthnAuthenticate",
       "verifyEmail",
       "sendEmailToken",
+      "changeEmail",
     ];
   }
   // class constant: maps the auth functions to their required HTTP verb for access
@@ -314,6 +320,7 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
       webAuthnAuthenticate: "POST",
       verifyEmail: "POST",
       sendEmailToken: "GET",
+      changeEmail: "POST",
     };
   }
 
@@ -551,6 +558,31 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
       // in the future
 
       return [user.id];
+    } catch (e) {
+      if (e instanceof DbAuthError.NotLoggedInError) {
+        return this._logoutResponse();
+      } else {
+        return this._logoutResponse({
+          error: e.message,
+        });
+      }
+    }
+  }
+  async changeEmail() {
+    try {
+      const user = await this._getCurrentUser(); // need to return *something* for our existing Authorization header stuff
+      // to work, so return the user's ID in case we can use it for something
+      // in the future
+      if (user.email === this.params.email || !this.params.email) {
+        throw new DbAuthError.UsernameRequiredError(
+          "A different email must be provided"
+        );
+      }
+      const handlerUser = await (
+        this.options.changeEmail as ChangeEmailOptions
+      ).handler(user);
+
+      return this._loginResponse(handlerUser);
     } catch (e) {
       if (e instanceof DbAuthError.NotLoggedInError) {
         return this._logoutResponse();
