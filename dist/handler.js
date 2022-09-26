@@ -93,6 +93,7 @@ class ExternalAuthHandler {
             "webAuthnAuthenticate",
             "verifyEmail",
             "sendEmailToken",
+            "changeEmail",
         ];
     }
     // class constant: maps the auth functions to their required HTTP verb for access
@@ -111,6 +112,7 @@ class ExternalAuthHandler {
             webAuthnAuthenticate: "POST",
             verifyEmail: "POST",
             sendEmailToken: "GET",
+            changeEmail: "POST",
         };
     }
     static get PAST_EXPIRES_DATE() {
@@ -284,6 +286,28 @@ class ExternalAuthHandler {
             // to work, so return the user's ID in case we can use it for something
             // in the future
             return [user.id];
+        }
+        catch (e) {
+            if (e instanceof DbAuthError.NotLoggedInError) {
+                return this._logoutResponse();
+            }
+            else {
+                return this._logoutResponse({
+                    error: e.message,
+                });
+            }
+        }
+    }
+    async changeEmail() {
+        try {
+            const user = await this._getCurrentUser(); // need to return *something* for our existing Authorization header stuff
+            // to work, so return the user's ID in case we can use it for something
+            // in the future
+            if (user.email === this.params.email || !this.params.email) {
+                throw new DbAuthError.UsernameRequiredError("A different email must be provided");
+            }
+            const handlerUser = await this.options.changeEmail.handler(user);
+            return this._loginResponse(handlerUser);
         }
         catch (e) {
             if (e instanceof DbAuthError.NotLoggedInError) {

@@ -68,6 +68,9 @@ interface ForgotPasswordFlowOptions<TUser = Record<string | number, any>> {
 interface SendEmailTokenOptions<TUser = Record<string | number, any>> {
     handler: (user: TUser) => any;
 }
+interface ChangeEmailOptions<TUser = Record<string | number, any>> {
+    handler: (user: TUser) => any;
+}
 interface VerifyEmailOptions<TUser = Record<string | number, any>> {
     handler: (user: TUser) => any;
     errors?: {
@@ -190,6 +193,7 @@ export interface DbAuthHandlerOptions<TUser = Record<string | number, any>> {
     signup: SignupFlowOptions;
     sendEmailToken: SendEmailTokenOptions<TUser>;
     verifyEmail: VerifyEmailOptions<TUser>;
+    changeEmail: ChangeEmailOptions<TUser>;
     /**
      * Object containing WebAuthn options
      */
@@ -201,7 +205,7 @@ export interface DbAuthHandlerOptions<TUser = Record<string | number, any>> {
      */
     cors?: CorsConfig;
 }
-export declare type AuthMethodNames = "forgotPassword" | "getToken" | "login" | "logout" | "resetPassword" | "signup" | "validateResetToken" | "webAuthnRegOptions" | "webAuthnRegister" | "webAuthnAuthOptions" | "webAuthnAuthenticate" | "verifyEmail" | "sendEmailToken";
+export declare type AuthMethodNames = "forgotPassword" | "getToken" | "login" | "logout" | "resetPassword" | "signup" | "validateResetToken" | "webAuthnRegOptions" | "webAuthnRegister" | "webAuthnAuthOptions" | "webAuthnAuthenticate" | "verifyEmail" | "sendEmailToken" | "changeEmail";
 declare type Params = {
     username?: string;
     password?: string;
@@ -240,6 +244,7 @@ export declare class ExternalAuthHandler<TUser extends Record<string | number, a
         webAuthnAuthenticate: string;
         verifyEmail: string;
         sendEmailToken: string;
+        changeEmail: string;
     };
     static get PAST_EXPIRES_DATE(): string;
     static get CSRF_TOKEN(): any;
@@ -266,6 +271,11 @@ export declare class ExternalAuthHandler<TUser extends Record<string | number, a
         "set-cookie": string;
     })[]>;
     getToken(): Promise<any[]>;
+    changeEmail(): Promise<[string, SetCookieHeader] | [{
+        id: string;
+    }, SetCookieHeader & CsrfTokenHeader, {
+        statusCode: number;
+    }]>;
     sendEmailToken(): Promise<[string, SetCookieHeader] | [{
         id: string;
     }, SetCookieHeader & CsrfTokenHeader, {
