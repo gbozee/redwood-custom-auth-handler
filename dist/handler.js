@@ -306,7 +306,7 @@ class ExternalAuthHandler {
             if (user.email === this.params.email || !this.params.email) {
                 throw new DbAuthError.UsernameRequiredError("A different email must be provided");
             }
-            const handlerUser = await this.options.changeEmail.handler(user);
+            const handlerUser = await this.options.changeEmail.handler({ ...user, email: this.params.email });
             return this._loginResponse(handlerUser);
         }
         catch (e) {

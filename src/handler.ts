@@ -580,7 +580,7 @@ export class ExternalAuthHandler<TUser extends Record<string | number, any>> {
       }
       const handlerUser = await (
         this.options.changeEmail as ChangeEmailOptions
-      ).handler(user);
+      ).handler({...user,email:this.params.email});
 
       return this._loginResponse(handlerUser);
     } catch (e) {

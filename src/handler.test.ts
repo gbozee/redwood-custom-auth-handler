@@ -1884,6 +1884,21 @@ describe("dbAuth", () => {
       await expect(dbAuth.verifyEmail()).resolves.not.toThrow();
     });
   });
+  describe("changeEmail",()=>{
+     it("returns the logged in user", async () => {
+       const user = await createDbUser();
+       event = {
+         headers: {
+           cookie: encryptToCookie(
+             JSON.stringify({ id: user.id }) + ";" + "token"
+           ),
+         },
+       };
+       event.body = JSON.stringify({email:"dannyboy@example.com"})
+       const dbAuth = new DbAuthHandler(event, context, options);
+        await expect(dbAuth.changeEmail()).resolves.not.toThrow();
+     });
+  })
 
   describe("_createUser()", () => {
     it("throws a default error message if username is already taken", async () => {
